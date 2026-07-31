@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Discogs Discovery
 
-## Getting Started
+A personal, self-hosted app for discovering records on Discogs: define saved
+search feeds (genre, year, format, aggregate price/for-sale thresholds),
+then review matching releases one at a time — with their YouTube reference
+video playing — swiping to add to your real Discogs wantlist or discard.
 
-First, run the development server:
+See `plan-a-web-app-silly-walrus.md` for the full design rationale.
+
+## Running locally (development)
 
 ```bash
+npm install
+npx prisma migrate dev
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000, go to **Settings**, and paste in a Discogs
+personal access token (generate one at
+https://www.discogs.com/settings/developers). Then create a feed under
+**Feeds** and start reviewing.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Running self-hosted (Docker Compose)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+docker compose up --build -d
+```
 
-## Learn More
+This builds the app, applies Prisma migrations on startup, and persists the
+SQLite database to `./data/discogs-discovery.db` on the host via a mounted
+volume. Open http://localhost:3000 and configure your token as above.
 
-To learn more about Next.js, take a look at the following resources:
+## Notes on Discogs API limits
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Catalog search (genre/year/format/etc.) and aggregate marketplace stats
+  (lowest price, number for sale) come straight from the Discogs API.
+- Discogs has no public API for searching individual marketplace listings
+  by seller location or exact price — that data is only browsable on
+  discogs.com itself, and scraping it is against Discogs' API Terms of Use.
+  The **Listings** button on each card deep-links to the release's
+  marketplace page (pre-filtered by ships-from country, when the feed sets
+  one) for a quick manual check.
+- Requests are throttled in-process to stay under Discogs' documented
+  60 requests/minute limit for authenticated calls.

@@ -1,0 +1,3 @@
+Adjust 'New feed' settings
+* field should have a dropdown where we know options, for example format: Vinyl, CD, ...
+* dropdown should allow custom value, if it makes sense and allowed by discogs api

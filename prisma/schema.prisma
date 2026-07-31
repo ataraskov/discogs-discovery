@@ -1,0 +1,116 @@
+// Prisma schema for Discogs Discovery
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Single-row table holding the Discogs personal access token for this
+// self-hosted, single-user instance.
+model Settings {
+  id              Int      @id @default(1)
+  discogsToken    String?
+  discogsUsername String?
+  updatedAt       DateTime @updatedAt
+}
+
+// A saved, reusable discovery feed. Every optional field maps 1:1 to a
+// `/database/search` query parameter, plus two aggregate-marketplace
+// thresholds that come from `/releases/{id}` instead.
+model Filter {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // /database/search params (all optional; omitted from the query when null)
+  q             String?
+  title         String?
+  releaseTitle  String?
+  artist        String?
+  anv           String?
+  credit        String?
+  label         String?
+  genre         String?
+  style         String?
+  country       String?
+  yearFrom      Int?
+  yearTo        Int?
+  format        String?
+  catno         String?
+  barcode       String?
+  track         String?
+  submitter     String?
+  contributor   String?
+  sort          String?
+  sortOrder     String?
+
+  // Aggregate marketplace thresholds, from /releases/{id}
+  maxLowestPrice Float?
+  minForSale     Int?
+
+  // Pagination cursor into /database/search so the enrichment job can
+  // resume walking results instead of restarting from page 1 each run.
+  nextSearchPage Int @default(1)
+
+  candidates CandidateQueue[]
+  reviewed   Reviewed[]
+}
+
+// An enriched, cached release ready to be shown on the Discovery screen.
+// Populated by the background enrichment job so swiping never blocks on a
+// live Discogs API call.
+model CandidateQueue {
+  id        String   @id @default(cuid())
+  filterId  String
+  filter    Filter   @relation(fields: [filterId], references: [id], onDelete: Cascade)
+  releaseId Int
+
+  title    String
+  artist   String?
+  year     Int?
+  label    String?
+  format   String?
+  genresJson String // JSON-encoded string[]
+  stylesJson String // JSON-encoded string[]
+  thumbUrl String?
+  videosJson String // JSON-encoded {uri, title, duration}[]
+
+  numForSale          Int?
+  lowestPrice         Float?
+  lowestPriceCurrency String?
+
+  fetchedAt DateTime @default(now())
+
+  @@unique([filterId, releaseId])
+  @@index([filterId, fetchedAt])
+}
+
+enum ReviewStatus {
+  WANTED
+  DISCARDED
+  SKIPPED
+}
+
+// The source of truth for "never show this release again". releaseId is
+// globally unique: once judged under any filter, a release is excluded
+// from every feed, not just the one that surfaced it.
+// Snapshots title/artist/thumbUrl at review time, since the source
+// CandidateQueue row is deleted on WANTED/DISCARDED (see actions.ts) —
+// Review History needs something to render without another API call.
+model Reviewed {
+  id         String       @id @default(cuid())
+  releaseId  Int          @unique
+  status     ReviewStatus
+  title      String
+  artist     String?
+  thumbUrl   String?
+  filterId   String?
+  filter     Filter?      @relation(fields: [filterId], references: [id], onDelete: SetNull)
+  reviewedAt DateTime     @default(now())
+}
