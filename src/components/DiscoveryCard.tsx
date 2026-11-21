@@ -58,23 +58,56 @@ export function DiscoveryCard({
     skip: null,
   });
 
+  // One verdict per card at a time. Without this, rapid input (a key held or
+  // pressed twice before the first verdict returns) queues several submits
+  // for the same candidate: the first succeeds, the rest come back "already
+  // reviewed", and since useActionState only surfaces the *last* result,
+  // onJudged sees just the error and the card never advances.
+  // The ref is the actual guard (it updates synchronously, so two keydowns
+  // in the same tick can't both pass); the state only drives the disabled
+  // look of the buttons. Released on error so the user can retry (e.g. a
+  // rejected wantlist write); on success this card is replaced by the next
+  // one (keyed by candidate id), which starts unlocked.
+  const judgingRef = useRef(false);
+  const [judging, setJudging] = useState(false);
+
+  function guardSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (judgingRef.current) {
+      e.preventDefault();
+      return;
+    }
+    judgingRef.current = true;
+    setJudging(true);
+  }
+
+  function handleResult(result: JudgeResult) {
+    if (result.status === "error") {
+      judgingRef.current = false;
+      setJudging(false);
+    }
+    onJudged(result);
+  }
+
   useEffect(() => {
     if (wantedState && wantedState !== handledRef.current.wanted) {
       handledRef.current.wanted = wantedState;
-      onJudged(wantedState);
+      handleResult(wantedState);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedState, onJudged]);
   useEffect(() => {
     if (discardState && discardState !== handledRef.current.discard) {
       handledRef.current.discard = discardState;
-      onJudged(discardState);
+      handleResult(discardState);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discardState, onJudged]);
   useEffect(() => {
     if (skipState && skipState !== handledRef.current.skip) {
       handledRef.current.skip = skipState;
-      onJudged(skipState);
+      handleResult(skipState);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skipState, onJudged]);
 
   const [trackIndex, setTrackIndex] = useState(initialTrackIndex);
@@ -314,24 +347,26 @@ export function DiscoveryCard({
       </motion.div>
 
       <div className="grid grid-cols-4 gap-2">
-        <form ref={discardFormRef} action={discardFormAction}>
+        <form ref={discardFormRef} action={discardFormAction} onSubmit={guardSubmit}>
           <input type="hidden" name="candidateId" value={candidate.id} />
           <input type="hidden" name="filterId" value={candidate.filterId} />
           <button
             type="submit"
-            className="w-full rounded border border-black/20 py-2 text-sm dark:border-white/20"
+            disabled={judging}
+            className="w-full rounded border border-black/20 py-2 text-sm dark:border-white/20 disabled:opacity-50"
             title="Discard (⇧←)"
           >
             Discard
           </button>
         </form>
 
-        <form ref={skipFormRef} action={skipFormAction}>
+        <form ref={skipFormRef} action={skipFormAction} onSubmit={guardSubmit}>
           <input type="hidden" name="candidateId" value={candidate.id} />
           <input type="hidden" name="filterId" value={candidate.filterId} />
           <button
             type="submit"
-            className="w-full rounded border border-black/20 py-2 text-sm dark:border-white/20"
+            disabled={judging}
+            className="w-full rounded border border-black/20 py-2 text-sm dark:border-white/20 disabled:opacity-50"
             title="Skip for later (↓)"
           >
             Skip
@@ -348,12 +383,13 @@ export function DiscoveryCard({
           Listings
         </a>
 
-        <form ref={wantedFormRef} action={wantedFormAction}>
+        <form ref={wantedFormRef} action={wantedFormAction} onSubmit={guardSubmit}>
           <input type="hidden" name="candidateId" value={candidate.id} />
           <input type="hidden" name="filterId" value={candidate.filterId} />
           <button
             type="submit"
-            className="w-full rounded bg-black py-2 text-sm text-white dark:bg-white dark:text-black"
+            disabled={judging}
+            className="w-full rounded bg-black py-2 text-sm text-white dark:bg-white dark:text-black disabled:opacity-50"
             title="Add to wantlist (⇧→)"
           >
             Wantlist
