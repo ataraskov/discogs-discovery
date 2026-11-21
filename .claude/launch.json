@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "start",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "port": 3000
+    },
+    {
+      "name": "start-data",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["DATABASE_URL=file:./data/discogs-discovery.db", "npm", "run", "start"],
+      "port": 3000
+    }
+  ]
+}
