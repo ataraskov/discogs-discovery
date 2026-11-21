@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getRelease, searchReleases, DiscogsApiError } from "@/lib/discogs";
-import type { Filter } from "@/generated/prisma/client";
+import { Prisma, type Filter } from "@/generated/prisma/client";
 
 const PER_PAGE = 50;
 // Stop a single enrichment run once it has queued this many new candidates
@@ -22,7 +22,35 @@ function parseYear(year: string | number | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-export async function enrichFilter(filter: Filter, token: string): Promise<number> {
+// In-flight enrichment runs, keyed by filter id. Refills are triggered from
+// many places at once (every judge action, the client's load-more, page
+// renders, the background interval), and a single run can take many seconds
+// under the Discogs throttle. Without this, overlapping runs for the same
+// filter read the same `nextSearchPage`, both pass the "already queued"
+// check for the same release, and the second insert fails on the
+// (filterId, releaseId) unique constraint. Module-level state is fine: this
+// app runs as a single Node process (see discogs.ts).
+const inFlight = new Map<string, Promise<number>>();
+
+// Concurrent callers for the same filter share the run already in progress
+// instead of starting a second one.
+export function enrichFilter(filter: Filter, token: string): Promise<number> {
+  const existing = inFlight.get(filter.id);
+  if (existing) return existing;
+
+  const run = runEnrichFilter(filter.id, token).finally(() => {
+    inFlight.delete(filter.id);
+  });
+  inFlight.set(filter.id, run);
+  return run;
+}
+
+async function runEnrichFilter(filterId: string, token: string): Promise<number> {
+  // Re-read inside the lock so the pagination cursor reflects the previous
+  // run's final update, not a snapshot the caller loaded earlier.
+  const filter = await prisma.filter.findUnique({ where: { id: filterId } });
+  if (!filter) return 0;
+
   let added = 0;
   let page = filter.nextSearchPage || 1;
   let totalPages = page;
@@ -97,31 +125,39 @@ export async function enrichFilter(filter: Filter, token: string): Promise<numbe
         if (release.lowest_price == null || release.lowest_price > filter.maxLowestPrice) continue;
       }
 
-      await prisma.candidateQueue.create({
-        data: {
-          filterId: filter.id,
-          releaseId: release.id,
-          title: release.title,
-          artist: release.artists?.map((a) => a.name).join(", "),
-          year: release.year,
-          label: release.labels?.map((l) => l.name).join(", "),
-          format: release.formats
-            ?.map((f) => [f.name, ...(f.descriptions ?? [])].join(" "))
-            .join(", "),
-          genresJson: JSON.stringify(release.genres ?? []),
-          stylesJson: JSON.stringify(release.styles ?? []),
-          thumbUrl: release.thumb || null,
-          videosJson: JSON.stringify(
-            (release.videos ?? []).map((v) => ({
-              uri: v.uri,
-              title: v.title,
-              duration: v.duration,
-            })),
-          ),
-          numForSale: release.num_for_sale ?? null,
-          lowestPrice: release.lowest_price ?? null,
-        },
-      });
+      try {
+        await prisma.candidateQueue.create({
+          data: {
+            filterId: filter.id,
+            releaseId: release.id,
+            title: release.title,
+            artist: release.artists?.map((a) => a.name).join(", "),
+            year: release.year,
+            label: release.labels?.map((l) => l.name).join(", "),
+            format: release.formats
+              ?.map((f) => [f.name, ...(f.descriptions ?? [])].join(" "))
+              .join(", "),
+            genresJson: JSON.stringify(release.genres ?? []),
+            stylesJson: JSON.stringify(release.styles ?? []),
+            thumbUrl: release.thumb || null,
+            videosJson: JSON.stringify(
+              (release.videos ?? []).map((v) => ({
+                uri: v.uri,
+                title: v.title,
+                duration: v.duration,
+              })),
+            ),
+            numForSale: release.num_for_sale ?? null,
+            lowestPrice: release.lowest_price ?? null,
+          },
+        });
+      } catch (err) {
+        // Defensive backstop for the race the in-flight map prevents in
+        // practice (e.g. dev-mode HMR loading two copies of this module):
+        // a duplicate just means another run queued it first.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") continue;
+        throw err;
+      }
       added++;
     }
 
