@@ -5,7 +5,7 @@ search feeds (genre, year, format, aggregate price/for-sale thresholds),
 then review matching releases one at a time — with their YouTube reference
 video playing — swiping to add to your real Discogs wantlist or discard.
 
-See `plan-a-web-app-silly-walrus.md` for the full design rationale.
+See `prompts/` for the original feature prompts and design history.
 
 ## Running locally (development)
 
